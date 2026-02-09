@@ -54,9 +54,9 @@ Working Rust/Rocket backend with full REST API:
 3. ~~**SSE event stream**~~ ✅ Done (2026-02-09 10:55 UTC) — per-workspace EventBus, 6 event types (workspace/document/comment/lock), 15s heartbeat
 4. ~~**429 JSON catcher**~~ ✅ Done (2026-02-09 10:55 UTC) — returns JSON with RATE_LIMIT_EXCEEDED code
 5. ~~**Frontend**~~ ✅ Done (2026-02-09 11:10 UTC) — React/Vite SPA: home (public + My Workspaces), workspace view, doc view with markdown rendering + syntax highlighting + comments, doc editor with lock management, version history with diff viewer, auth key detection + localStorage persistence
-6. **Redeploy to staging** — push triggers CI → ghcr.io → Watchtower auto-pulls
-7. **Lock renew endpoint** — POST /docs/:id/lock/renew
-8. **Comment moderation** — PATCH/DELETE comments with manage_key
+6. ~~**Redeploy to staging**~~ ✅ Done (2026-02-09 11:20 UTC) — manual pull, frontend serving confirmed
+7. ~~**Lock renew endpoint**~~ ✅ Done (2026-02-09 11:25 UTC) — `POST /lock/renew` with editor + ttl_seconds, conflict if different editor or expired
+8. ~~**Comment moderation**~~ ✅ Done (2026-02-09 11:25 UTC) — `PATCH` (resolve/unresolve + content edit), `DELETE` with manage_key auth, cascading reply deletion, frontend UI with ✓/↩ resolve toggle + ✕ delete button, resolved comments visually dimmed with green checkmark
 9. **Frontend polish** — mobile responsive, Cloudflare tunnel (docs.ckbdev.com)
 
 ### ⚠️ Gotchas
@@ -97,4 +97,11 @@ Working Rust/Rocket backend with full REST API:
 
 ---
 
-*Last updated: 2026-02-09 11:10 UTC — React frontend complete. 20 tests passing, zero clippy warnings.*
+### Completed (2026-02-09 Overnight — 11:25 UTC)
+
+- **Lock renew** — `POST /workspaces/:id/docs/:doc_id/lock/renew` with editor + ttl_seconds. Only the editor holding the lock can renew. Frontend auto-renews every 30s with editor name. 1 new test.
+- **Comment moderation** — `PATCH /comments/:id` for resolve/unresolve + content edit, `DELETE /comments/:id` with cascading reply deletion. Frontend: ✓/↩ toggle + ✕ delete button for editors, resolved comments dimmed with green border. 2 new tests.
+- **OpenAPI updated** — lock/renew + comment PATCH/DELETE in spec
+- **Frontend redeployed** — manual Docker pull, frontend serving on 192.168.0.79:3005
+
+*Last updated: 2026-02-09 11:25 UTC — lock renew + comment moderation. 23 tests passing, zero clippy warnings.*
