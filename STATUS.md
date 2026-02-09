@@ -57,6 +57,7 @@ Working Rust/Rocket backend with full REST API:
 - Tests should run with `--test-threads=1` (shared in-memory DB)
 - Version endpoints accept doc_id without re-checking workspace membership (OK for now; UUIDs are unguessable)
 - CI workflow push may be blocked if token lacks `workflow` scope — file exists locally at `.github/workflows/ci.yml`
+- **Docker build gotcha:** Docker `COPY` can preserve older file mtimes; Cargo may skip rebuilding if a dummy build step ran later. Dockerfile now `touch`es `src/**/*.rs` before the final `cargo build --release`.
 - No frontend yet — API-only mode
 
 ### Architecture Notes
