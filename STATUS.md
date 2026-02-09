@@ -53,9 +53,11 @@ Working Rust/Rocket backend with full REST API:
 2. ~~**Rate limiting**~~ ✅ Done (2026-02-09 10:55 UTC) — IP-based, 10 workspaces/hr/IP (WORKSPACE_RATE_LIMIT env), ClientIp guard
 3. ~~**SSE event stream**~~ ✅ Done (2026-02-09 10:55 UTC) — per-workspace EventBus, 6 event types (workspace/document/comment/lock), 15s heartbeat
 4. ~~**429 JSON catcher**~~ ✅ Done (2026-02-09 10:55 UTC) — returns JSON with RATE_LIMIT_EXCEEDED code
-5. **Frontend** (React/Vite) — workspace listing, doc view, editor, version browser, diff viewer
-6. **Lock renew endpoint** — POST /docs/:id/lock/renew
-7. **Comment moderation** — PATCH/DELETE comments with manage_key
+5. ~~**Frontend**~~ ✅ Done (2026-02-09 11:10 UTC) — React/Vite SPA: home (public + My Workspaces), workspace view, doc view with markdown rendering + syntax highlighting + comments, doc editor with lock management, version history with diff viewer, auth key detection + localStorage persistence
+6. **Redeploy to staging** — push triggers CI → ghcr.io → Watchtower auto-pulls
+7. **Lock renew endpoint** — POST /docs/:id/lock/renew
+8. **Comment moderation** — PATCH/DELETE comments with manage_key
+9. **Frontend polish** — mobile responsive, Cloudflare tunnel (docs.ckbdev.com)
 
 ### ⚠️ Gotchas
 
@@ -63,7 +65,11 @@ Working Rust/Rocket backend with full REST API:
 - Version endpoints accept doc_id without re-checking workspace membership (OK for now; UUIDs are unguessable)
 - CI workflow push may be blocked if token lacks `workflow` scope — file exists locally at `.github/workflows/ci.yml`
 - **Docker build gotcha:** Docker `COPY` can preserve older file mtimes; Cargo may skip rebuilding if a dummy build step ran later. Dockerfile now `touch`es `src/**/*.rs` before the final `cargo build --release`.
-- No frontend yet — API-only mode
+- Frontend built and served from Rocket (SPA fallback)
+
+### Completed (2026-02-09 Overnight — 11:10 UTC)
+
+- **React frontend** — Full SPA with all views: home page (public workspaces + My Workspaces + create + open by ID), workspace page (document listing, search, SSE real-time, settings), document view (rendered markdown with syntax highlighting, comments, version history link), document editor (markdown textarea, lock management with acquire/renew/release), version history (version list, colored unified diff viewer, restore). Dark theme matching HNR design system. Auth key detection from URL (?key=) + localStorage persistence. Dockerfile updated to 3-stage build. Commit: ea631c2
 
 ### Architecture Notes
 
@@ -91,4 +97,4 @@ Working Rust/Rocket backend with full REST API:
 
 ---
 
-*Last updated: 2026-02-09 10:55 UTC — rate limiting, SSE events, 429 catcher, deployed to staging. 20 tests passing, zero clippy warnings.*
+*Last updated: 2026-02-09 11:10 UTC — React frontend complete. 20 tests passing, zero clippy warnings.*
