@@ -29,7 +29,12 @@ Working Rust/Rocket backend with full REST API:
   - **Search:** GET /workspaces/:id/search?q=term
   - Health: /api/v1/health
   - **OpenAPI:** GET /api/v1/openapi.json
-- **Tests:** 17 integration tests, all passing
+- **Rate limiting** — IP-based, 10 workspaces/hr/IP, configurable via WORKSPACE_RATE_LIMIT env
+- **SSE events** — per-workspace event stream with 6 event types:
+  - workspace.created, document.created, document.updated, document.deleted
+  - comment.created, lock.acquired, lock.released
+  - 15s heartbeat, lagged-client handling, graceful shutdown
+- **Tests:** 20 integration tests, all passing
 - **Docker:** Dockerfile (2-stage Rust build → slim runtime)
 - **CI/CD:** GitHub Actions (test + Docker build/push to ghcr.io)
 - **docker-compose.yml:** ready for staging deployment
@@ -44,13 +49,13 @@ Working Rust/Rocket backend with full REST API:
 
 ### What's Next (Priority Order)
 
-1. **Deploy to staging** — waiting for CI to build ghcr.io image, then `docker compose pull && up -d` on 192.168.0.79
-2. **Rate limiting** — IP-based for workspace creation (match kanban/blog pattern)
-3. **SSE event stream** for workspace doc updates + lock changes
-4. **Frontend** (React/Vite) — workspace listing, doc view, editor, version browser, diff viewer
-5. **Lock renew endpoint** — POST /docs/:id/lock/renew
-6. **Comment moderation** — PATCH/DELETE comments with manage_key
-7. **JSON error catchers** — 401/404/422/429/500 (already have some, add 429)
+1. ~~**Deploy to staging**~~ ✅ Done (2026-02-09 10:49 UTC) — pulled ghcr.io image, running on 192.168.0.79:3005
+2. ~~**Rate limiting**~~ ✅ Done (2026-02-09 10:55 UTC) — IP-based, 10 workspaces/hr/IP (WORKSPACE_RATE_LIMIT env), ClientIp guard
+3. ~~**SSE event stream**~~ ✅ Done (2026-02-09 10:55 UTC) — per-workspace EventBus, 6 event types (workspace/document/comment/lock), 15s heartbeat
+4. ~~**429 JSON catcher**~~ ✅ Done (2026-02-09 10:55 UTC) — returns JSON with RATE_LIMIT_EXCEEDED code
+5. **Frontend** (React/Vite) — workspace listing, doc view, editor, version browser, diff viewer
+6. **Lock renew endpoint** — POST /docs/:id/lock/renew
+7. **Comment moderation** — PATCH/DELETE comments with manage_key
 
 ### ⚠️ Gotchas
 
@@ -68,6 +73,13 @@ Working Rust/Rocket backend with full REST API:
 - `lib.rs` — Rocket builder, catchers, SPA fallback
 - Single-threaded SQLite via `Mutex<Connection>`
 
+### Completed (2026-02-09 Overnight — 10:55 UTC)
+
+- **Deployed to staging** — 192.168.0.79:3005, health check confirmed
+- **Rate limiting** — IP-based workspace creation limit (10/hr default), ClientIp guard (XFF/X-Real-Ip/socket), 429 JSON catcher
+- **SSE event stream** — EventBus with broadcast channel, per-workspace filtering, 6 event types, 15s heartbeat, lagged-client warning, graceful shutdown
+- **3 new tests** — rate limiting, SSE endpoint exists, 429 catcher (20 total)
+
 ### Completed (2026-02-09 Overnight — 10:08 UTC)
 
 - **Search endpoint** — `GET /api/v1/workspaces/:id/search?q=term` with LIKE across title/content/summary/tags
@@ -79,4 +91,4 @@ Working Rust/Rocket backend with full REST API:
 
 ---
 
-*Last updated: 2026-02-09 10:08 UTC — search, restore, OpenAPI, Docker, CI. 17 tests passing.*
+*Last updated: 2026-02-09 10:55 UTC — rate limiting, SSE events, 429 catcher, deployed to staging. 20 tests passing, zero clippy warnings.*
