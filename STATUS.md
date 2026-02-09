@@ -113,4 +113,8 @@ Working Rust/Rocket backend with full REST API:
 
 - **llms.txt endpoint** ✅ — `/api/v1/llms.txt` and `/llms.txt` (root level) for AI agent API discovery. Documents all endpoints, auth model, quick start guide. Consistent with other HNR services. Commit: bbb7097
 
-*Last updated: 2026-02-09 15:25 UTC — llms.txt endpoint. 23 tests passing, zero clippy warnings.*
+### Completed (2026-02-09 Overnight — 15:37 UTC)
+
+- **Fix Docker build for llms.txt** ✅ — Dockerfile was missing `COPY llms.txt` causing CI Docker builds to fail (include_str! couldn't find the file). Tests pass locally because the file exists at project root. Commit: 2c5d7c4
+
+*Last updated: 2026-02-09 15:37 UTC — Docker build fix for llms.txt. 23 tests passing, zero clippy warnings.*
