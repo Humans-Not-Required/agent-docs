@@ -659,10 +659,33 @@ function DocPage({ ctx }) {
         <div style={{ maxHeight: '40vh', overflowY: 'auto', marginBottom: 16 }}>
           {comments.length === 0 && <p style={{ color: '#64748b', fontStyle: 'italic' }}>No comments yet.</p>}
           {comments.map(c => (
-            <div key={c.id} style={{ padding: '10px 12px', background: '#1e293b', borderRadius: 6, marginBottom: 8 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                <span style={{ fontWeight: 600, fontSize: '0.85rem', color: '#f1f5f9' }}>{c.author_name}</span>
-                <span style={{ fontSize: '0.75rem', color: '#64748b' }}>{timeAgo(c.created_at)}</span>
+            <div key={c.id} style={{ padding: '10px 12px', background: c.resolved ? '#0f172a' : '#1e293b', borderRadius: 6, marginBottom: 8, opacity: c.resolved ? 0.7 : 1, borderLeft: c.resolved ? '3px solid #22c55e' : 'none' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, gap: 8 }}>
+                <span style={{ fontWeight: 600, fontSize: '0.85rem', color: '#f1f5f9' }}>
+                  {c.author_name} {c.resolved && <span style={{ color: '#22c55e', fontWeight: 400 }}>✓ resolved</span>}
+                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: '0.75rem', color: '#64748b' }}>{timeAgo(c.created_at)}</span>
+                  {isEditor && (
+                    <>
+                      <button onClick={async () => {
+                        await api(`/workspaces/${wsId}/docs/${doc.id}/comments/${c.id}`, {
+                          method: 'PATCH', body: { resolved: !c.resolved },
+                        });
+                        loadComments();
+                      }} title={c.resolved ? 'Unresolve' : 'Resolve'}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', fontSize: '0.8rem', padding: '2px 4px' }}>
+                        {c.resolved ? '↩' : '✓'}
+                      </button>
+                      <button onClick={async () => {
+                        if (!confirm('Delete this comment?')) return;
+                        await api(`/workspaces/${wsId}/docs/${doc.id}/comments/${c.id}`, { method: 'DELETE' });
+                        loadComments();
+                      }} title="Delete comment"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', fontSize: '0.8rem', padding: '2px 4px' }}>✕</button>
+                    </>
+                  )}
+                </div>
               </div>
               <p style={{ fontSize: '0.9rem', color: '#cbd5e1', lineHeight: 1.5 }}>{c.content}</p>
             </div>
@@ -728,7 +751,8 @@ function EditPage({ ctx, isNew }) {
     // Renew lock every 30s
     lockInterval.current = setInterval(() => {
       api(`/workspaces/${wsId}/docs/${docId}/lock/renew`, {
-        method: 'POST', headers: authHeaders(wsKey),
+        method: 'POST', body: { editor: authorName || 'Anonymous', ttl_seconds: 60 },
+        headers: authHeaders(wsKey),
       });
     }, 30000);
     return () => {

@@ -535,6 +535,150 @@ fn test_sse_endpoint_exists() {
 }
 
 #[test]
+fn test_lock_renew() {
+    let client = test_client();
+    let ws = create_workspace(&client, "Renew Lock WS");
+    let ws_id = ws["id"].as_str().unwrap();
+    let key = ws["manage_key"].as_str().unwrap();
+
+    let doc = create_doc(&client, ws_id, key, "Renew Lock Doc", "Content");
+    let doc_id = doc["id"].as_str().unwrap();
+
+    // Acquire lock
+    let res = client
+        .post(format!("/api/v1/workspaces/{}/docs/{}/lock", ws_id, doc_id))
+        .header(ContentType::JSON)
+        .header(rocket::http::Header::new("Authorization", format!("Bearer {}", key)))
+        .body(r#"{"editor": "Agent1", "ttl_seconds": 60}"#)
+        .dispatch();
+    assert_eq!(res.status(), Status::Ok);
+
+    // Renew lock by same editor
+    let res = client
+        .post(format!("/api/v1/workspaces/{}/docs/{}/lock/renew", ws_id, doc_id))
+        .header(ContentType::JSON)
+        .header(rocket::http::Header::new("Authorization", format!("Bearer {}", key)))
+        .body(r#"{"editor": "Agent1", "ttl_seconds": 120}"#)
+        .dispatch();
+    assert_eq!(res.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&res.into_string().unwrap()).unwrap();
+    assert_eq!(body["status"], "renewed");
+    assert_eq!(body["ttl_seconds"], 120);
+
+    // Renew by different editor should fail
+    let res = client
+        .post(format!("/api/v1/workspaces/{}/docs/{}/lock/renew", ws_id, doc_id))
+        .header(ContentType::JSON)
+        .header(rocket::http::Header::new("Authorization", format!("Bearer {}", key)))
+        .body(r#"{"editor": "Agent2", "ttl_seconds": 60}"#)
+        .dispatch();
+    assert_eq!(res.status(), Status::Conflict);
+
+    // Release lock
+    let _ = client
+        .delete(format!("/api/v1/workspaces/{}/docs/{}/lock", ws_id, doc_id))
+        .header(rocket::http::Header::new("Authorization", format!("Bearer {}", key)))
+        .dispatch();
+}
+
+#[test]
+fn test_comment_moderation() {
+    let client = test_client();
+    let ws = create_workspace(&client, "Comment Mod WS");
+    let ws_id = ws["id"].as_str().unwrap();
+    let key = ws["manage_key"].as_str().unwrap();
+
+    let doc = create_doc(&client, ws_id, key, "Comment Mod Doc", "Content");
+    let doc_id = doc["id"].as_str().unwrap();
+
+    // Add comment
+    let res = client
+        .post(format!("/api/v1/workspaces/{}/docs/{}/comments", ws_id, doc_id))
+        .header(ContentType::JSON)
+        .body(r#"{"author_name": "Agent1", "content": "To be resolved"}"#)
+        .dispatch();
+    assert_eq!(res.status(), Status::Created);
+    let comment: Value = serde_json::from_str(&res.into_string().unwrap()).unwrap();
+    let comment_id = comment["id"].as_str().unwrap();
+
+    // Resolve comment (PATCH)
+    let res = client
+        .patch(format!("/api/v1/workspaces/{}/docs/{}/comments/{}", ws_id, doc_id, comment_id))
+        .header(ContentType::JSON)
+        .header(rocket::http::Header::new("Authorization", format!("Bearer {}", key)))
+        .body(r#"{"resolved": true}"#)
+        .dispatch();
+    assert_eq!(res.status(), Status::Ok);
+
+    // Verify resolved
+    let res = client
+        .get(format!("/api/v1/workspaces/{}/docs/{}/comments", ws_id, doc_id))
+        .dispatch();
+    let comments: Value = serde_json::from_str(&res.into_string().unwrap()).unwrap();
+    assert_eq!(comments[0]["resolved"], true);
+
+    // Add another comment to delete
+    let res = client
+        .post(format!("/api/v1/workspaces/{}/docs/{}/comments", ws_id, doc_id))
+        .header(ContentType::JSON)
+        .body(r#"{"author_name": "Spammer", "content": "Delete me"}"#)
+        .dispatch();
+    assert_eq!(res.status(), Status::Created);
+    let spam: Value = serde_json::from_str(&res.into_string().unwrap()).unwrap();
+    let spam_id = spam["id"].as_str().unwrap();
+
+    // Delete comment
+    let res = client
+        .delete(format!("/api/v1/workspaces/{}/docs/{}/comments/{}", ws_id, doc_id, spam_id))
+        .header(rocket::http::Header::new("Authorization", format!("Bearer {}", key)))
+        .dispatch();
+    assert_eq!(res.status(), Status::Ok);
+
+    // Verify only 1 comment remains
+    let res = client
+        .get(format!("/api/v1/workspaces/{}/docs/{}/comments", ws_id, doc_id))
+        .dispatch();
+    let comments: Value = serde_json::from_str(&res.into_string().unwrap()).unwrap();
+    assert_eq!(comments.as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn test_comment_update_content() {
+    let client = test_client();
+    let ws = create_workspace(&client, "Comment Edit WS");
+    let ws_id = ws["id"].as_str().unwrap();
+    let key = ws["manage_key"].as_str().unwrap();
+
+    let doc = create_doc(&client, ws_id, key, "Comment Edit Doc", "Content");
+    let doc_id = doc["id"].as_str().unwrap();
+
+    // Add comment
+    let res = client
+        .post(format!("/api/v1/workspaces/{}/docs/{}/comments", ws_id, doc_id))
+        .header(ContentType::JSON)
+        .body(r#"{"author_name": "Agent1", "content": "Original text"}"#)
+        .dispatch();
+    assert_eq!(res.status(), Status::Created);
+    let comment: Value = serde_json::from_str(&res.into_string().unwrap()).unwrap();
+    let comment_id = comment["id"].as_str().unwrap();
+
+    // Update content
+    let res = client
+        .patch(format!("/api/v1/workspaces/{}/docs/{}/comments/{}", ws_id, doc_id, comment_id))
+        .header(ContentType::JSON)
+        .header(rocket::http::Header::new("Authorization", format!("Bearer {}", key)))
+        .body(r#"{"content": "Updated text"}"#)
+        .dispatch();
+    assert_eq!(res.status(), Status::Ok);
+
+    // Delete without auth should fail
+    let res = client
+        .delete(format!("/api/v1/workspaces/{}/docs/{}/comments/{}", ws_id, doc_id, comment_id))
+        .dispatch();
+    assert_eq!(res.status(), Status::Unauthorized);
+}
+
+#[test]
 fn test_429_json_catcher() {
     std::env::set_var("WORKSPACE_RATE_LIMIT", "1");
     let client = test_client();

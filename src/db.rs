@@ -603,6 +603,74 @@ pub fn release_lock(db: &Db, doc_id: &str) -> Result<bool, String> {
     Ok(rows > 0)
 }
 
+/// Renew an existing lock if held by the given editor. Returns Ok(true) if renewed,
+/// Ok(false) if the lock is held by someone else or expired.
+pub fn renew_lock(db: &Db, doc_id: &str, editor: &str, ttl_seconds: i32) -> Result<bool, String> {
+    let conn = db.conn.lock().unwrap();
+    // Only renew if the lock is currently held by this editor and not expired
+    let rows = conn.execute(
+        "UPDATE documents SET lock_expires_at = datetime('now', '+' || ?1 || ' seconds'), updated_at = datetime('now') \
+         WHERE id = ?2 AND locked_by = ?3 AND lock_expires_at > datetime('now')",
+        params![ttl_seconds, doc_id, editor],
+    ).map_err(|e| e.to_string())?;
+    Ok(rows > 0)
+}
+
+// --- Comment moderation ---
+
+pub fn delete_comment(db: &Db, comment_id: &str) -> Result<bool, String> {
+    let conn = db.conn.lock().unwrap();
+    // Delete child comments first (replies), then the comment itself
+    conn.execute(
+        "DELETE FROM comments WHERE parent_id = ?1",
+        params![comment_id],
+    ).map_err(|e| e.to_string())?;
+    let rows = conn.execute(
+        "DELETE FROM comments WHERE id = ?1",
+        params![comment_id],
+    ).map_err(|e| e.to_string())?;
+    Ok(rows > 0)
+}
+
+pub fn update_comment(db: &Db, comment_id: &str, content: Option<&str>, resolved: Option<bool>) -> Result<bool, String> {
+    let conn = db.conn.lock().unwrap();
+    let mut updates = Vec::new();
+    let mut values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+    if let Some(c) = content {
+        updates.push("content = ?");
+        values.push(Box::new(c.to_string()));
+    }
+    if let Some(r) = resolved {
+        updates.push("resolved = ?");
+        values.push(Box::new(r as i32));
+    }
+
+    if updates.is_empty() {
+        return Ok(false);
+    }
+
+    updates.push("updated_at = datetime('now')");
+    let sql = format!("UPDATE comments SET {} WHERE id = ?", updates.join(", "));
+    values.push(Box::new(comment_id.to_string()));
+
+    let params_refs: Vec<&dyn rusqlite::ToSql> = values.iter().map(|v| v.as_ref()).collect();
+    let rows = conn.execute(&sql, params_refs.as_slice()).map_err(|e| e.to_string())?;
+    Ok(rows > 0)
+}
+
+/// Get the document_id for a comment (to look up workspace for SSE events)
+pub fn get_comment_doc_id(db: &Db, comment_id: &str) -> Result<Option<String>, String> {
+    let conn = db.conn.lock().unwrap();
+    conn.query_row(
+        "SELECT document_id FROM comments WHERE id = ?1",
+        params![comment_id],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
 // Need this import for .optional()
 use rusqlite::OptionalExtension;
 

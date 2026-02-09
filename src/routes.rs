@@ -661,6 +661,127 @@ pub fn release_lock(
     }
 }
 
+// --- Lock renew ---
+
+#[post(
+    "/workspaces/<ws_id>/docs/<doc_id>/lock/renew",
+    format = "json",
+    data = "<body>"
+)]
+pub fn renew_lock(
+    db: &State<Db>,
+    ws_id: &str,
+    doc_id: &str,
+    token: WorkspaceToken,
+    body: Json<Value>,
+    event_bus: &State<EventBus>,
+) -> (Status, Json<Value>) {
+    if let Err((status, err)) = verify_workspace_auth(db, ws_id, &token) {
+        return (status, Json(err));
+    }
+
+    let editor = body
+        .get("editor")
+        .and_then(|v| v.as_str())
+        .unwrap_or("anonymous");
+    let ttl = body
+        .get("ttl_seconds")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(60) as i32;
+
+    match crate::db::renew_lock(db, doc_id, editor, ttl) {
+        Ok(true) => {
+            event_bus.emit(
+                ws_id,
+                "lock.renewed",
+                json!({"document_id": doc_id, "locked_by": editor, "ttl_seconds": ttl}),
+            );
+            (
+                Status::Ok,
+                Json(json!({"status": "renewed", "locked_by": editor, "ttl_seconds": ttl})),
+            )
+        }
+        Ok(false) => (
+            Status::Conflict,
+            Json(json!({"error": "Lock not held by this editor or expired", "code": "LOCK_CONFLICT"})),
+        ),
+        Err(e) => (Status::InternalServerError, Json(json!({"error": e}))),
+    }
+}
+
+// --- Comment moderation ---
+
+#[delete("/workspaces/<ws_id>/docs/<_doc_id>/comments/<comment_id>")]
+pub fn delete_comment(
+    db: &State<Db>,
+    ws_id: &str,
+    _doc_id: &str,
+    comment_id: &str,
+    token: WorkspaceToken,
+    event_bus: &State<EventBus>,
+) -> (Status, Json<Value>) {
+    if let Err((status, err)) = verify_workspace_auth(db, ws_id, &token) {
+        return (status, Json(err));
+    }
+
+    match crate::db::delete_comment(db, comment_id) {
+        Ok(true) => {
+            event_bus.emit(ws_id, "comment.deleted", json!({"comment_id": comment_id}));
+            (Status::Ok, Json(json!({"status": "deleted"})))
+        }
+        Ok(false) => (
+            Status::NotFound,
+            Json(json!({"error": "Comment not found"})),
+        ),
+        Err(e) => (Status::InternalServerError, Json(json!({"error": e}))),
+    }
+}
+
+#[patch(
+    "/workspaces/<ws_id>/docs/<_doc_id>/comments/<comment_id>",
+    format = "json",
+    data = "<body>"
+)]
+pub fn update_comment(
+    db: &State<Db>,
+    ws_id: &str,
+    _doc_id: &str,
+    comment_id: &str,
+    token: WorkspaceToken,
+    body: Json<Value>,
+    event_bus: &State<EventBus>,
+) -> (Status, Json<Value>) {
+    if let Err((status, err)) = verify_workspace_auth(db, ws_id, &token) {
+        return (status, Json(err));
+    }
+
+    let content = body.get("content").and_then(|v| v.as_str());
+    let resolved = body.get("resolved").and_then(|v| v.as_bool());
+
+    if content.is_none() && resolved.is_none() {
+        return (
+            Status::UnprocessableEntity,
+            Json(json!({"error": "Provide content and/or resolved", "code": "MISSING_FIELDS"})),
+        );
+    }
+
+    match crate::db::update_comment(db, comment_id, content, resolved) {
+        Ok(true) => {
+            let mut data = json!({"comment_id": comment_id});
+            if let Some(r) = resolved {
+                data["resolved"] = json!(r);
+            }
+            event_bus.emit(ws_id, "comment.updated", data);
+            (Status::Ok, Json(json!({"status": "updated"})))
+        }
+        Ok(false) => (
+            Status::NotFound,
+            Json(json!({"error": "Comment not found"})),
+        ),
+        Err(e) => (Status::InternalServerError, Json(json!({"error": e}))),
+    }
+}
+
 // --- Search ---
 
 #[get("/workspaces/<ws_id>/search?<q>&<limit>&<offset>")]
@@ -873,6 +994,27 @@ pub fn openapi_spec() -> (Status, (rocket::http::ContentType, String)) {
                     "summary": "Release edit lock",
                     "security": [{ "ManageKey": [] }],
                     "responses": { "200": { "description": "Lock released" } }
+                }
+            },
+            "/workspaces/{workspace_id}/docs/{doc_id}/lock/renew": {
+                "post": {
+                    "summary": "Renew edit lock TTL",
+                    "security": [{ "ManageKey": [] }],
+                    "requestBody": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AcquireLock" } } } },
+                    "responses": { "200": { "description": "Lock renewed" }, "409": { "description": "Lock not held by editor or expired" } }
+                }
+            },
+            "/workspaces/{workspace_id}/docs/{doc_id}/comments/{comment_id}": {
+                "patch": {
+                    "summary": "Update/resolve comment",
+                    "security": [{ "ManageKey": [] }],
+                    "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "content": { "type": "string" }, "resolved": { "type": "boolean" } } } } } },
+                    "responses": { "200": { "description": "Comment updated" }, "404": { "description": "Comment not found" } }
+                },
+                "delete": {
+                    "summary": "Delete comment",
+                    "security": [{ "ManageKey": [] }],
+                    "responses": { "200": { "description": "Comment deleted" }, "404": { "description": "Comment not found" } }
                 }
             },
             "/workspaces/{workspace_id}/search": {
