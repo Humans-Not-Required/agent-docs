@@ -109,4 +109,8 @@ Working Rust/Rocket backend with full REST API:
 
 - **Mobile responsive frontend** — useIsMobile hook (640px breakpoint), bottom-sheet modals on mobile (slide up from bottom with rounded top corners, 85dvh max), single-column grid for edit form Title/Author and Tags/Status rows, adaptive textarea height (250px mobile vs 400px desktop), full-width comment name input on mobile, responsive hero (smaller logo/text), version history hides word count + wraps change desc on mobile, iOS zoom prevention (16px font-size on inputs), touch-friendly 36px min-height buttons, table horizontal scroll on mobile. Commit: a29905e
 
-*Last updated: 2026-02-09 11:40 UTC — mobile responsive frontend. 23 tests passing, zero clippy warnings.*
+### Completed (2026-02-09 Overnight — 15:25 UTC)
+
+- **llms.txt endpoint** ✅ — `/api/v1/llms.txt` and `/llms.txt` (root level) for AI agent API discovery. Documents all endpoints, auth model, quick start guide. Consistent with other HNR services. Commit: bbb7097
+
+*Last updated: 2026-02-09 15:25 UTC — llms.txt endpoint. 23 tests passing, zero clippy warnings.*
