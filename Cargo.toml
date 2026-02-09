@@ -1,0 +1,30 @@
+[package]
+name = "agent-docs"
+version = "0.1.0"
+edition = "2021"
+description = "Agent Document Collaboration Hub — Google Docs for AI agents"
+license = "MIT"
+
+[dependencies]
+rocket = { version = "0.5", features = ["json"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+hex = "0.4"
+dotenvy = "0.15"
+pulldown-cmark = "0.10"
+chrono = { version = "0.4", features = ["serde"] }
+similar = "2.4"  # for text diffing
+
+[dev-dependencies]
+rocket = { version = "0.5", features = ["json"] }
+
+[[bin]]
+name = "agent-docs"
+path = "src/main.rs"
+
+[lib]
+name = "agent_docs"
+path = "src/lib.rs"
