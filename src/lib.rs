@@ -1,10 +1,13 @@
 pub mod auth;
 pub mod db;
+pub mod events;
+pub mod rate_limit;
 pub mod routes;
 
 use rocket::fs::FileServer;
 use rocket::serde::json::{json, Json, Value};
 use rocket::{catch, catchers, Request};
+use std::time::Duration;
 
 // --- JSON error catchers ---
 
@@ -23,6 +26,11 @@ fn not_found(_req: &Request) -> Json<Value> {
 #[catch(422)]
 fn unprocessable(_req: &Request) -> Json<Value> {
     Json(json!({"error": "Invalid request body", "code": "UNPROCESSABLE_ENTITY"}))
+}
+
+#[catch(429)]
+fn too_many_requests(_req: &Request) -> Json<Value> {
+    Json(json!({"error": "Rate limit exceeded — try again later", "code": "RATE_LIMIT_EXCEEDED"}))
 }
 
 #[catch(500)]
@@ -46,8 +54,20 @@ pub fn build_rocket(db: db::Db) -> rocket::Rocket<rocket::Build> {
         .join("index.html")
         .exists();
 
+    // Rate limiter: 10 workspace creations per hour per IP (matches kanban/blog)
+    let rate_limit: u64 = std::env::var("WORKSPACE_RATE_LIMIT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10);
+    let rate_limiter = rate_limit::RateLimiter::new(Duration::from_secs(3600), rate_limit);
+
+    // SSE event bus
+    let event_bus = events::EventBus::new();
+
     let mut rocket = rocket::build()
         .manage(db)
+        .manage(rate_limiter)
+        .manage(event_bus)
         .mount(
             "/api/v1",
             rocket::routes![
@@ -71,11 +91,18 @@ pub fn build_rocket(db: db::Db) -> rocket::Rocket<rocket::Build> {
                 routes::restore_version,
                 routes::health,
                 routes::openapi_spec,
+                routes::event_stream,
             ],
         )
         .register(
             "/",
-            catchers![unauthorized, not_found, unprocessable, internal_error],
+            catchers![
+                unauthorized,
+                not_found,
+                unprocessable,
+                too_many_requests,
+                internal_error,
+            ],
         );
 
     if has_frontend {

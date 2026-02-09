@@ -17,6 +17,7 @@ dotenvy = "0.15"
 pulldown-cmark = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
 similar = "2.4"  # for text diffing
+tokio = { version = "1", features = ["sync", "time"] }
 
 [dev-dependencies]
 rocket = { version = "0.5", features = ["json"] }

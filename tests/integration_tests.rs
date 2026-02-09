@@ -490,3 +490,71 @@ fn test_restore_version() {
     let body: Value = serde_json::from_str(&res.into_string().unwrap()).unwrap();
     assert!(body["content"].as_str().unwrap().contains("Version 1"));
 }
+
+#[test]
+fn test_rate_limiting() {
+    // Build a client with a low rate limit for testing
+    std::env::set_var("WORKSPACE_RATE_LIMIT", "3");
+    let client = test_client();
+
+    // First 3 should succeed
+    for i in 0..3 {
+        let res = client
+            .post("/api/v1/workspaces")
+            .header(ContentType::JSON)
+            .body(format!(r#"{{"name": "RateTest{}"}}"#, i))
+            .dispatch();
+        assert_eq!(res.status(), Status::Created);
+    }
+
+    // 4th should be rate limited
+    let res = client
+        .post("/api/v1/workspaces")
+        .header(ContentType::JSON)
+        .body(r#"{"name": "RateTestBlocked"}"#)
+        .dispatch();
+    assert_eq!(res.status(), Status::TooManyRequests);
+    let body: Value = serde_json::from_str(&res.into_string().unwrap()).unwrap();
+    assert_eq!(body["code"], "RATE_LIMIT_EXCEEDED");
+
+    // Reset env
+    std::env::set_var("WORKSPACE_RATE_LIMIT", "10");
+}
+
+#[test]
+fn test_sse_endpoint_exists() {
+    let client = test_client();
+    let ws = create_workspace(&client, "SSETest");
+    let ws_id = ws["id"].as_str().unwrap();
+
+    // SSE endpoint should return 200 with event stream
+    let res = client
+        .get(format!("/api/v1/workspaces/{}/events/stream", ws_id))
+        .dispatch();
+    assert_eq!(res.status(), Status::Ok);
+}
+
+#[test]
+fn test_429_json_catcher() {
+    std::env::set_var("WORKSPACE_RATE_LIMIT", "1");
+    let client = test_client();
+
+    // Use up the rate limit
+    let _ = client
+        .post("/api/v1/workspaces")
+        .header(ContentType::JSON)
+        .body(r#"{"name": "First"}"#)
+        .dispatch();
+
+    // Second request should get JSON 429
+    let res = client
+        .post("/api/v1/workspaces")
+        .header(ContentType::JSON)
+        .body(r#"{"name": "Second"}"#)
+        .dispatch();
+    assert_eq!(res.status(), Status::TooManyRequests);
+    let body: Value = serde_json::from_str(&res.into_string().unwrap()).unwrap();
+    assert!(body["error"].as_str().unwrap().contains("Rate limit"));
+
+    std::env::set_var("WORKSPACE_RATE_LIMIT", "10");
+}

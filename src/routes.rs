@@ -1,8 +1,13 @@
 use crate::auth::{generate_key, hash_key, verify_key, WorkspaceToken};
 use crate::db::Db;
+use crate::events::EventBus;
+use crate::rate_limit::{ClientIp, RateLimiter};
 use rocket::http::Status;
+use rocket::response::stream::{Event, EventStream};
 use rocket::serde::json::{json, Json, Value};
-use rocket::{delete, get, patch, post, State};
+use rocket::tokio::select;
+use rocket::tokio::time::{interval, Duration};
+use rocket::{delete, get, patch, post, Shutdown, State};
 
 // Helper: render markdown to HTML
 fn render_markdown(content: &str) -> String {
@@ -61,7 +66,24 @@ fn verify_workspace_auth(
 // --- Workspace routes ---
 
 #[post("/workspaces", format = "json", data = "<body>")]
-pub fn create_workspace(db: &State<Db>, body: Json<Value>) -> (Status, Json<Value>) {
+pub fn create_workspace(
+    db: &State<Db>,
+    body: Json<Value>,
+    client_ip: ClientIp,
+    rate_limiter: &State<RateLimiter>,
+    event_bus: &State<EventBus>,
+) -> (Status, Json<Value>) {
+    let rl = rate_limiter.check_default(&client_ip.0);
+    if !rl.allowed {
+        return (
+            Status::TooManyRequests,
+            Json(json!({
+                "error": "Rate limit exceeded — try again later",
+                "code": "RATE_LIMIT_EXCEEDED",
+                "retry_after_secs": rl.reset_secs,
+            })),
+        );
+    }
     let name = match body.get("name").and_then(|v| v.as_str()) {
         Some(n) if !n.trim().is_empty() => n.trim().to_string(),
         _ => {
@@ -88,6 +110,11 @@ pub fn create_workspace(db: &State<Db>, body: Json<Value>) -> (Status, Json<Valu
 
     match crate::db::create_workspace(db, &id, &name, &description, &key_hash, is_public) {
         Ok(()) => {
+            event_bus.emit(
+                &id,
+                "workspace.created",
+                json!({"id": id, "name": name, "is_public": is_public}),
+            );
             let base_url = format!("/workspace/{}", id);
             (
                 Status::Created,
@@ -166,6 +193,7 @@ pub fn create_document(
     ws_id: &str,
     token: WorkspaceToken,
     body: Json<Value>,
+    event_bus: &State<EventBus>,
 ) -> (Status, Json<Value>) {
     if let Err((status, err)) = verify_workspace_auth(db, ws_id, &token) {
         return (status, Json(err));
@@ -231,18 +259,25 @@ pub fn create_document(
         &author_name,
         wc,
     ) {
-        Ok(()) => (
-            Status::Created,
-            Json(json!({
-                "id": id,
-                "workspace_id": ws_id,
-                "title": title,
-                "slug": slug,
-                "status": status_val,
-                "word_count": wc,
-                "author_name": author_name,
-            })),
-        ),
+        Ok(()) => {
+            event_bus.emit(
+                ws_id,
+                "document.created",
+                json!({"id": id, "title": title, "slug": slug, "author_name": author_name}),
+            );
+            (
+                Status::Created,
+                Json(json!({
+                    "id": id,
+                    "workspace_id": ws_id,
+                    "title": title,
+                    "slug": slug,
+                    "status": status_val,
+                    "word_count": wc,
+                    "author_name": author_name,
+                })),
+            )
+        }
         Err(e) if e.contains("UNIQUE constraint") => (
             Status::Conflict,
             Json(
@@ -289,6 +324,7 @@ pub fn update_document(
     doc_id: &str,
     token: WorkspaceToken,
     body: Json<Value>,
+    event_bus: &State<EventBus>,
 ) -> (Status, Json<Value>) {
     if let Err((status, err)) = verify_workspace_auth(db, ws_id, &token) {
         return (status, Json(err));
@@ -333,7 +369,14 @@ pub fn update_document(
         wc,
         change_description,
     ) {
-        Ok(true) => (Status::Ok, Json(json!({"status": "updated"}))),
+        Ok(true) => {
+            event_bus.emit(
+                ws_id,
+                "document.updated",
+                json!({"id": doc_id, "title": title, "author_name": author_name}),
+            );
+            (Status::Ok, Json(json!({"status": "updated"})))
+        }
         Ok(false) => (
             Status::BadRequest,
             Json(json!({"error": "No fields to update"})),
@@ -348,13 +391,17 @@ pub fn delete_document(
     ws_id: &str,
     doc_id: &str,
     token: WorkspaceToken,
+    event_bus: &State<EventBus>,
 ) -> (Status, Json<Value>) {
     if let Err((status, err)) = verify_workspace_auth(db, ws_id, &token) {
         return (status, Json(err));
     }
 
     match crate::db::delete_document(db, doc_id) {
-        Ok(true) => (Status::Ok, Json(json!({"status": "deleted"}))),
+        Ok(true) => {
+            event_bus.emit(ws_id, "document.deleted", json!({"id": doc_id}));
+            (Status::Ok, Json(json!({"status": "deleted"})))
+        }
         Ok(false) => (
             Status::NotFound,
             Json(json!({"error": "Document not found"})),
@@ -467,15 +514,16 @@ pub fn get_diff(
 // --- Comment routes ---
 
 #[post(
-    "/workspaces/<_ws_id>/docs/<doc_id>/comments",
+    "/workspaces/<ws_id>/docs/<doc_id>/comments",
     format = "json",
     data = "<body>"
 )]
 pub fn create_comment(
     db: &State<Db>,
-    _ws_id: &str,
+    ws_id: &str,
     doc_id: &str,
     body: Json<Value>,
+    event_bus: &State<EventBus>,
 ) -> (Status, Json<Value>) {
     let author_name = match body.get("author_name").and_then(|v| v.as_str()) {
         Some(n) if !n.trim().is_empty() => n.trim().to_string(),
@@ -511,16 +559,23 @@ pub fn create_comment(
         &author_name,
         &content,
     ) {
-        Ok(()) => (
-            Status::Created,
-            Json(json!({
-                "id": id,
-                "document_id": doc_id,
-                "parent_id": parent_id,
-                "author_name": author_name,
-                "content": content,
-            })),
-        ),
+        Ok(()) => {
+            event_bus.emit(
+                ws_id,
+                "comment.created",
+                json!({"id": id, "document_id": doc_id, "author_name": author_name}),
+            );
+            (
+                Status::Created,
+                Json(json!({
+                    "id": id,
+                    "document_id": doc_id,
+                    "parent_id": parent_id,
+                    "author_name": author_name,
+                    "content": content,
+                })),
+            )
+        }
         Err(e) => (Status::InternalServerError, Json(json!({"error": e}))),
     }
 }
@@ -546,6 +601,7 @@ pub fn acquire_lock(
     doc_id: &str,
     token: WorkspaceToken,
     body: Json<Value>,
+    event_bus: &State<EventBus>,
 ) -> (Status, Json<Value>) {
     if let Err((status, err)) = verify_workspace_auth(db, ws_id, &token) {
         return (status, Json(err));
@@ -561,10 +617,17 @@ pub fn acquire_lock(
         .unwrap_or(60) as i32;
 
     match crate::db::acquire_lock(db, doc_id, editor, ttl) {
-        Ok(true) => (
-            Status::Ok,
-            Json(json!({"status": "locked", "locked_by": editor, "ttl_seconds": ttl})),
-        ),
+        Ok(true) => {
+            event_bus.emit(
+                ws_id,
+                "lock.acquired",
+                json!({"document_id": doc_id, "locked_by": editor, "ttl_seconds": ttl}),
+            );
+            (
+                Status::Ok,
+                Json(json!({"status": "locked", "locked_by": editor, "ttl_seconds": ttl})),
+            )
+        }
         Ok(false) => (
             Status::Conflict,
             Json(json!({"error": "Document is locked by another editor", "code": "LOCK_CONFLICT"})),
@@ -579,13 +642,17 @@ pub fn release_lock(
     ws_id: &str,
     doc_id: &str,
     token: WorkspaceToken,
+    event_bus: &State<EventBus>,
 ) -> (Status, Json<Value>) {
     if let Err((status, err)) = verify_workspace_auth(db, ws_id, &token) {
         return (status, Json(err));
     }
 
     match crate::db::release_lock(db, doc_id) {
-        Ok(true) => (Status::Ok, Json(json!({"status": "unlocked"}))),
+        Ok(true) => {
+            event_bus.emit(ws_id, "lock.released", json!({"document_id": doc_id}));
+            (Status::Ok, Json(json!({"status": "unlocked"})))
+        }
         Ok(false) => (
             Status::NotFound,
             Json(json!({"error": "Document not found"})),
@@ -877,4 +944,46 @@ pub fn openapi_spec() -> (Status, (rocket::http::ContentType, String)) {
             serde_json::to_string_pretty(&spec).unwrap_or_default(),
         ),
     )
+}
+
+// --- SSE Event Stream ---
+
+#[get("/workspaces/<workspace_id>/events/stream")]
+pub fn event_stream(
+    workspace_id: &str,
+    event_bus: &State<EventBus>,
+    mut shutdown: Shutdown,
+) -> EventStream![] {
+    let mut rx = event_bus.subscribe();
+    let ws_id = workspace_id.to_string();
+
+    EventStream! {
+        let mut heartbeat = interval(Duration::from_secs(15));
+
+        loop {
+            select! {
+                msg = rx.recv() => {
+                    match msg {
+                        Ok(evt) if evt.workspace_id == ws_id => {
+                            yield Event::json(&evt.data).event(evt.event_type);
+                        }
+                        Ok(_) => {}, // Different workspace, skip
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                            yield Event::json(&json!({"warning": format!("Missed {} events", n)}))
+                                .event("system");
+                        }
+                        Err(_) => break,
+                    }
+                }
+                _ = heartbeat.tick() => {
+                    yield Event::empty().event("heartbeat").id("hb");
+                }
+                _ = &mut shutdown => {
+                    yield Event::json(&json!({"message": "Server shutting down"}))
+                        .event("system");
+                    break;
+                }
+            }
+        }
+    }
 }
