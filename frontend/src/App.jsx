@@ -2,6 +2,18 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 
 const API = '/api/v1';
 
+// ─── Responsive Hook ────────────────────────────────────────────────────────
+
+function useIsMobile(breakpoint = 640) {
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < breakpoint);
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < breakpoint);
+    window.addEventListener('resize', handler);
+    return () => window.removeEventListener('resize', handler);
+  }, [breakpoint]);
+  return isMobile;
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function api(path, opts = {}) {
@@ -73,6 +85,7 @@ function useEscapeKey(onEscape, active = true) {
 export default function App() {
   const [route, setRoute] = useState({ page: 'home' });
   const [manageKey, setManageKey] = useState('');
+  const isMobile = useIsMobile();
 
   // Parse URL on load and on popstate
   useEffect(() => {
@@ -119,12 +132,12 @@ export default function App() {
   const wsKey = route.wsId ? getStoredKey(route.wsId) : '';
   const isEditor = !!wsKey;
 
-  const ctx = { route, navigate, wsKey, isEditor };
+  const ctx = { route, navigate, wsKey, isEditor, isMobile };
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <Header ctx={ctx} />
-      <main style={{ flex: 1, maxWidth: 1100, margin: '0 auto', width: '100%', padding: '24px 16px' }}>
+      <main style={{ flex: 1, maxWidth: 1100, margin: '0 auto', width: '100%', padding: isMobile ? '16px 12px' : '24px 16px' }}>
         {route.page === 'home' && <HomePage ctx={ctx} />}
         {route.page === 'workspace' && <WorkspacePage ctx={ctx} />}
         {route.page === 'doc' && <DocPage ctx={ctx} />}
@@ -169,7 +182,7 @@ function Header({ ctx }) {
 // ─── Home Page ──────────────────────────────────────────────────────────────
 
 function HomePage({ ctx }) {
-  const { navigate } = ctx;
+  const { navigate, isMobile } = ctx;
   const [publicWs, setPublicWs] = useState([]);
   const [myWs, setMyWs] = useState(getMyWorkspaces());
   const [showCreate, setShowCreate] = useState(false);
@@ -198,12 +211,12 @@ function HomePage({ ctx }) {
   return (
     <div>
       {/* Hero */}
-      <div style={{ textAlign: 'center', padding: '40px 0 32px' }}>
-        <Logo size={48} />
-        <h1 style={{ fontSize: '2rem', fontWeight: 800, margin: '16px 0 8px', color: '#f1f5f9' }}>
+      <div style={{ textAlign: 'center', padding: isMobile ? '24px 0 20px' : '40px 0 32px' }}>
+        <Logo size={isMobile ? 36 : 48} />
+        <h1 style={{ fontSize: isMobile ? '1.5rem' : '2rem', fontWeight: 800, margin: '16px 0 8px', color: '#f1f5f9' }}>
           Agent Docs
         </h1>
-        <p style={{ color: '#94a3b8', fontSize: '1.1rem', maxWidth: 500, margin: '0 auto 24px' }}>
+        <p style={{ color: '#94a3b8', fontSize: isMobile ? '0.95rem' : '1.1rem', maxWidth: 500, margin: '0 auto 24px' }}>
           Collaborative documents for AI agents. Create workspaces, write docs, version history, comments — all API-first.
         </p>
         <button onClick={() => setShowCreate(true)} style={btnPrimary}>+ Create Workspace</button>
@@ -213,7 +226,7 @@ function HomePage({ ctx }) {
       {myWs.length > 0 && (
         <section style={{ marginBottom: 32 }}>
           <h2 style={{ fontSize: '1.1rem', fontWeight: 600, color: '#f1f5f9', marginBottom: 12 }}>My Workspaces</h2>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
             {myWs.map(w => (
               <div key={w.id} style={cardStyle} onClick={() => navigate(`/workspace/${w.id}`)}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -253,7 +266,7 @@ function HomePage({ ctx }) {
         {filtered.length === 0 && (
           <p style={{ color: '#64748b', fontStyle: 'italic' }}>No public workspaces yet. Create the first one!</p>
         )}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(300px, 1fr))', gap: 12 }}>
           {filtered.map(w => (
             <div key={w.id} style={cardStyle} onClick={() => navigate(`/workspace/${w.id}`)}>
               <h3 style={{ fontWeight: 600, color: '#f1f5f9', marginBottom: 4 }}>{w.name}</h3>
@@ -342,7 +355,7 @@ function CreateWorkspaceModal({ onClose, ctx, onCreated }) {
 // ─── Workspace Page ─────────────────────────────────────────────────────────
 
 function WorkspacePage({ ctx }) {
-  const { route, navigate, wsKey, isEditor } = ctx;
+  const { route, navigate, wsKey, isEditor, isMobile } = ctx;
   const { wsId } = route;
   const [ws, setWs] = useState(null);
   const [docs, setDocs] = useState([]);
@@ -532,7 +545,7 @@ function WorkspaceSettingsModal({ ws, wsKey, onClose, onSaved }) {
 // ─── Document Page ──────────────────────────────────────────────────────────
 
 function DocPage({ ctx }) {
-  const { route, navigate, wsKey, isEditor } = ctx;
+  const { route, navigate, wsKey, isEditor, isMobile } = ctx;
   const { wsId, slug } = route;
   const [doc, setDoc] = useState(null);
   const [comments, setComments] = useState([]);
@@ -608,9 +621,9 @@ function DocPage({ ctx }) {
 
       {/* Doc header */}
       <div style={{ marginBottom: 24 }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-          <h1 style={{ fontSize: '1.8rem', fontWeight: 700, color: '#f1f5f9' }}>{doc.title}</h1>
-          <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: isMobile ? 'flex-start' : 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', flexDirection: isMobile ? 'column' : 'row' }}>
+          <h1 style={{ fontSize: isMobile ? '1.4rem' : '1.8rem', fontWeight: 700, color: '#f1f5f9' }}>{doc.title}</h1>
+          <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
             {isEditor && <button onClick={() => navigate(`/workspace/${wsId}/edit/${slug}`)} style={btnPrimary}>Edit</button>}
             <button onClick={() => navigate(`/workspace/${wsId}/versions/${doc.id}`)} style={btnSecondary}>History</button>
             {isEditor && <button onClick={handleDelete} style={{ ...btnSecondary, color: '#ef4444' }}>Delete</button>}
@@ -656,7 +669,7 @@ function DocPage({ ctx }) {
         <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: '#f1f5f9', marginBottom: 16 }}>
           Comments ({comments.length})
         </h3>
-        <div style={{ maxHeight: '40vh', overflowY: 'auto', marginBottom: 16 }}>
+        <div style={{ maxHeight: isMobile ? '30vh' : '40vh', overflowY: 'auto', marginBottom: 16 }}>
           {comments.length === 0 && <p style={{ color: '#64748b', fontStyle: 'italic' }}>No comments yet.</p>}
           {comments.map(c => (
             <div key={c.id} style={{ padding: '10px 12px', background: c.resolved ? '#0f172a' : '#1e293b', borderRadius: 6, marginBottom: 8, opacity: c.resolved ? 0.7 : 1, borderLeft: c.resolved ? '3px solid #22c55e' : 'none' }}>
@@ -695,7 +708,7 @@ function DocPage({ ctx }) {
         {/* Add comment */}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <input value={commentName} onChange={e => setCommentName(e.target.value)} placeholder="Your name"
-            style={{ ...inputStyle, width: 140, height: 36 }} />
+            style={{ ...inputStyle, width: isMobile ? '100%' : 140, height: 36 }} />
           <input value={newComment} onChange={e => setNewComment(e.target.value)} placeholder="Write a comment…"
             onKeyDown={e => e.key === 'Enter' && handleComment()}
             style={{ ...inputStyle, flex: 1, height: 36 }} />
@@ -710,7 +723,7 @@ function DocPage({ ctx }) {
 // ─── Edit Page ──────────────────────────────────────────────────────────────
 
 function EditPage({ ctx, isNew }) {
-  const { route, navigate, wsKey } = ctx;
+  const { route, navigate, wsKey, isMobile } = ctx;
   const { wsId, slug } = route;
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
@@ -807,7 +820,7 @@ function EditPage({ ctx, isNew }) {
 
       {error && <p style={{ color: '#ef4444', marginBottom: 12, fontSize: '0.85rem' }}>{error}</p>}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12, marginBottom: 12 }}>
         <div>
           <label style={labelStyle}>Title *</label>
           <input value={title} onChange={e => setTitle(e.target.value)} style={inputStyle}
@@ -826,7 +839,7 @@ function EditPage({ ctx, isNew }) {
           placeholder="Brief description of this document" />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12, marginBottom: 12 }}>
         <div>
           <label style={labelStyle}>Tags (comma-separated)</label>
           <input value={tags} onChange={e => setTags(e.target.value)} style={inputStyle}
@@ -845,7 +858,7 @@ function EditPage({ ctx, isNew }) {
       <div style={{ marginBottom: 12 }}>
         <label style={labelStyle}>Content (Markdown)</label>
         <textarea value={content} onChange={e => setContent(e.target.value)}
-          style={{ ...inputStyle, minHeight: 400, fontFamily: "'SF Mono', 'Fira Code', monospace", fontSize: '0.9rem', lineHeight: 1.6 }}
+          style={{ ...inputStyle, minHeight: isMobile ? 250 : 400, fontFamily: "'SF Mono', 'Fira Code', monospace", fontSize: isMobile ? '0.85rem' : '0.9rem', lineHeight: 1.6 }}
           placeholder="Write your document in markdown…" />
       </div>
 
@@ -871,7 +884,7 @@ function EditPage({ ctx, isNew }) {
 // ─── Versions Page ──────────────────────────────────────────────────────────
 
 function VersionsPage({ ctx }) {
-  const { route, navigate, wsKey, isEditor } = ctx;
+  const { route, navigate, wsKey, isEditor, isMobile } = ctx;
   const { wsId, docId } = route;
   const [versions, setVersions] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -958,14 +971,14 @@ function VersionsPage({ ctx }) {
           ...cardStyle, marginBottom: 8, cursor: 'pointer',
           borderColor: selected?.version_number === v.version_number ? '#3b82f6' : '#334155',
         }} onClick={() => viewVersion(v.version_number)}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+            <div style={{ minWidth: 0 }}>
               <span style={{ fontWeight: 600, color: '#f1f5f9' }}>Version {v.version_number}</span>
               {v.author_name && <span style={{ color: '#94a3b8', marginLeft: 8, fontSize: '0.85rem' }}>by {v.author_name}</span>}
-              {v.change_description && <span style={{ color: '#64748b', marginLeft: 8, fontSize: '0.85rem' }}>— {v.change_description}</span>}
+              {v.change_description && !isMobile && <span style={{ color: '#64748b', marginLeft: 8, fontSize: '0.85rem' }}>— {v.change_description}</span>}
             </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <span style={{ fontSize: '0.75rem', color: '#64748b' }}>{v.word_count} words</span>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+              {!isMobile && <span style={{ fontSize: '0.75rem', color: '#64748b' }}>{v.word_count} words</span>}
               <span style={{ fontSize: '0.75rem', color: '#64748b' }}>{timeAgo(v.created_at)}</span>
               {isEditor && (
                 <button onClick={(e) => { e.stopPropagation(); handleRestore(v.version_number); }}
@@ -973,6 +986,9 @@ function VersionsPage({ ctx }) {
               )}
             </div>
           </div>
+          {isMobile && v.change_description && (
+            <div style={{ color: '#64748b', fontSize: '0.8rem', marginTop: 4 }}>{v.change_description}</div>
+          )}
         </div>
       ))}
 
@@ -992,14 +1008,18 @@ function VersionsPage({ ctx }) {
 // ─── Shared Components ──────────────────────────────────────────────────────
 
 function Modal({ children, onClose }) {
+  const isMobile = useIsMobile();
   return (
     <div onClick={onClose} style={{
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex',
-      alignItems: 'flex-start', justifyContent: 'center', zIndex: 1000, padding: '6vh 16px', overflowY: 'auto',
+      alignItems: isMobile ? 'flex-end' : 'flex-start', justifyContent: 'center', zIndex: 1000,
+      padding: isMobile ? 0 : '6vh 16px', overflowY: 'auto',
     }}>
       <div onClick={e => e.stopPropagation()} style={{
-        background: '#1e293b', borderRadius: 12, border: '1px solid #334155', padding: 24,
-        maxWidth: 520, width: '100%', maxHeight: '88vh', overflowY: 'auto',
+        background: '#1e293b', border: '1px solid #334155', padding: isMobile ? '20px 16px' : 24,
+        maxWidth: isMobile ? '100%' : 520, width: '100%',
+        maxHeight: isMobile ? '85dvh' : '88vh', overflowY: 'auto',
+        borderRadius: isMobile ? '16px 16px 0 0' : 12,
       }}>
         {children}
       </div>
