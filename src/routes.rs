@@ -594,6 +594,84 @@ pub fn release_lock(
     }
 }
 
+// --- Search ---
+
+#[get("/workspaces/<ws_id>/search?<q>&<limit>&<offset>")]
+pub fn search_documents(
+    db: &State<Db>,
+    ws_id: &str,
+    q: &str,
+    limit: Option<i32>,
+    offset: Option<i32>,
+) -> (Status, Json<Value>) {
+    let limit = limit.unwrap_or(20).min(100);
+    let offset = offset.unwrap_or(0);
+
+    match crate::db::search_documents(db, ws_id, q, limit, offset) {
+        Ok(docs) => (
+            Status::Ok,
+            Json(json!({ "query": q, "results": docs, "count": docs.len() })),
+        ),
+        Err(e) => (Status::InternalServerError, Json(json!({"error": e}))),
+    }
+}
+
+// --- Restore version ---
+
+#[post("/workspaces/<ws_id>/docs/<doc_id>/versions/<version_num>/restore")]
+pub fn restore_version(
+    db: &State<Db>,
+    ws_id: &str,
+    doc_id: &str,
+    version_num: i32,
+    token: WorkspaceToken,
+) -> (Status, Json<Value>) {
+    if let Err((status, err)) = verify_workspace_auth(db, ws_id, &token) {
+        return (status, Json(err));
+    }
+
+    // Get the version to restore
+    let version = match crate::db::get_version(db, doc_id, version_num) {
+        Ok(Some(v)) => v,
+        Ok(None) => {
+            return (
+                Status::NotFound,
+                Json(json!({"error": format!("Version {} not found", version_num)})),
+            )
+        }
+        Err(e) => return (Status::InternalServerError, Json(json!({"error": e}))),
+    };
+
+    let content = version["content"].as_str().unwrap_or("");
+    let content_html = render_markdown(content);
+    let wc = word_count(content);
+    let change_desc = format!("Restored from version {}", version_num);
+
+    match crate::db::update_document(
+        db,
+        doc_id,
+        None,
+        Some(content),
+        Some(&content_html),
+        None,
+        None,
+        None,
+        None,
+        Some(wc),
+        Some(&change_desc),
+    ) {
+        Ok(_) => (
+            Status::Ok,
+            Json(json!({
+                "status": "restored",
+                "from_version": version_num,
+                "word_count": wc,
+            })),
+        ),
+        Err(e) => (Status::InternalServerError, Json(json!({"error": e}))),
+    }
+}
+
 // --- Health & Discovery ---
 
 #[get("/health")]
@@ -602,4 +680,201 @@ pub fn health() -> Json<Value> {
         "status": "ok",
         "version": "0.1.0",
     }))
+}
+
+#[get("/openapi.json")]
+pub fn openapi_spec() -> (Status, (rocket::http::ContentType, String)) {
+    let spec = serde_json::json!({
+        "openapi": "3.0.3",
+        "info": {
+            "title": "Agent Docs API",
+            "description": "Agent Document Collaboration Hub — Google Docs for AI agents",
+            "version": "0.1.0",
+            "license": { "name": "MIT" }
+        },
+        "servers": [{ "url": "/api/v1" }],
+        "paths": {
+            "/workspaces": {
+                "post": {
+                    "summary": "Create workspace",
+                    "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateWorkspace" } } } },
+                    "responses": { "201": { "description": "Workspace created (includes manage_key)" } }
+                },
+                "get": {
+                    "summary": "List public workspaces",
+                    "responses": { "200": { "description": "Array of public workspaces" } }
+                }
+            },
+            "/workspaces/{workspace_id}": {
+                "get": {
+                    "summary": "Get workspace",
+                    "parameters": [{ "name": "workspace_id", "in": "path", "required": true, "schema": { "type": "string" } }],
+                    "responses": { "200": { "description": "Workspace details" } }
+                },
+                "patch": {
+                    "summary": "Update workspace",
+                    "security": [{ "ManageKey": [] }],
+                    "parameters": [{ "name": "workspace_id", "in": "path", "required": true, "schema": { "type": "string" } }],
+                    "responses": { "200": { "description": "Updated" } }
+                }
+            },
+            "/workspaces/{workspace_id}/docs": {
+                "post": {
+                    "summary": "Create document",
+                    "security": [{ "ManageKey": [] }],
+                    "responses": { "201": { "description": "Document created" } }
+                },
+                "get": {
+                    "summary": "List documents (published only; all with key)",
+                    "parameters": [
+                        { "name": "workspace_id", "in": "path", "required": true, "schema": { "type": "string" } },
+                        { "name": "key", "in": "query", "schema": { "type": "string" }, "description": "Manage key to include drafts" }
+                    ],
+                    "responses": { "200": { "description": "Array of documents" } }
+                }
+            },
+            "/workspaces/{workspace_id}/docs/{slug}": {
+                "get": {
+                    "summary": "Get document by slug",
+                    "responses": { "200": { "description": "Document with rendered HTML" } }
+                }
+            },
+            "/workspaces/{workspace_id}/docs/{doc_id}": {
+                "patch": {
+                    "summary": "Update document (creates version)",
+                    "security": [{ "ManageKey": [] }],
+                    "responses": { "200": { "description": "Updated" } }
+                },
+                "delete": {
+                    "summary": "Delete document",
+                    "security": [{ "ManageKey": [] }],
+                    "responses": { "200": { "description": "Deleted" } }
+                }
+            },
+            "/workspaces/{workspace_id}/docs/{doc_id}/versions": {
+                "get": {
+                    "summary": "List version history",
+                    "parameters": [
+                        { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20 } },
+                        { "name": "offset", "in": "query", "schema": { "type": "integer", "default": 0 } }
+                    ],
+                    "responses": { "200": { "description": "Array of versions" } }
+                }
+            },
+            "/workspaces/{workspace_id}/docs/{doc_id}/versions/{num}": {
+                "get": {
+                    "summary": "Get specific version",
+                    "responses": { "200": { "description": "Version content" } }
+                }
+            },
+            "/workspaces/{workspace_id}/docs/{doc_id}/versions/{num}/restore": {
+                "post": {
+                    "summary": "Restore document to this version",
+                    "security": [{ "ManageKey": [] }],
+                    "responses": { "200": { "description": "Restored" } }
+                }
+            },
+            "/workspaces/{workspace_id}/docs/{doc_id}/diff": {
+                "get": {
+                    "summary": "Diff between two versions",
+                    "parameters": [
+                        { "name": "from", "in": "query", "required": true, "schema": { "type": "integer" } },
+                        { "name": "to", "in": "query", "required": true, "schema": { "type": "integer" } }
+                    ],
+                    "responses": { "200": { "description": "Unified diff + stats" } }
+                }
+            },
+            "/workspaces/{workspace_id}/docs/{doc_id}/comments": {
+                "post": {
+                    "summary": "Add comment",
+                    "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateComment" } } } },
+                    "responses": { "201": { "description": "Comment created" } }
+                },
+                "get": {
+                    "summary": "List comments (threaded)",
+                    "responses": { "200": { "description": "Array of comments" } }
+                }
+            },
+            "/workspaces/{workspace_id}/docs/{doc_id}/lock": {
+                "post": {
+                    "summary": "Acquire edit lock",
+                    "security": [{ "ManageKey": [] }],
+                    "requestBody": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AcquireLock" } } } },
+                    "responses": { "200": { "description": "Lock acquired" }, "409": { "description": "Lock conflict" } }
+                },
+                "delete": {
+                    "summary": "Release edit lock",
+                    "security": [{ "ManageKey": [] }],
+                    "responses": { "200": { "description": "Lock released" } }
+                }
+            },
+            "/workspaces/{workspace_id}/search": {
+                "get": {
+                    "summary": "Search documents in workspace",
+                    "parameters": [
+                        { "name": "q", "in": "query", "required": true, "schema": { "type": "string" } },
+                        { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20 } },
+                        { "name": "offset", "in": "query", "schema": { "type": "integer", "default": 0 } }
+                    ],
+                    "responses": { "200": { "description": "Search results" } }
+                }
+            },
+            "/health": {
+                "get": {
+                    "summary": "Health check",
+                    "responses": { "200": { "description": "Service status" } }
+                }
+            },
+            "/openapi.json": {
+                "get": {
+                    "summary": "OpenAPI 3.0 specification",
+                    "responses": { "200": { "description": "This document" } }
+                }
+            }
+        },
+        "components": {
+            "securitySchemes": {
+                "ManageKey": {
+                    "type": "apiKey",
+                    "in": "header",
+                    "name": "Authorization",
+                    "description": "Bearer <manage_key>, X-API-Key: <manage_key>, or ?key=<manage_key>"
+                }
+            },
+            "schemas": {
+                "CreateWorkspace": {
+                    "type": "object",
+                    "required": ["name"],
+                    "properties": {
+                        "name": { "type": "string" },
+                        "description": { "type": "string" },
+                        "is_public": { "type": "boolean", "default": false }
+                    }
+                },
+                "CreateComment": {
+                    "type": "object",
+                    "required": ["author_name", "content"],
+                    "properties": {
+                        "author_name": { "type": "string" },
+                        "content": { "type": "string" },
+                        "parent_id": { "type": "string", "description": "Reply to another comment" }
+                    }
+                },
+                "AcquireLock": {
+                    "type": "object",
+                    "properties": {
+                        "editor": { "type": "string", "default": "anonymous" },
+                        "ttl_seconds": { "type": "integer", "default": 60 }
+                    }
+                }
+            }
+        }
+    });
+    (
+        Status::Ok,
+        (
+            rocket::http::ContentType::JSON,
+            serde_json::to_string_pretty(&spec).unwrap_or_default(),
+        ),
+    )
 }

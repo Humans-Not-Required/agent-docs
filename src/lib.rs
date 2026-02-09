@@ -67,7 +67,10 @@ pub fn build_rocket(db: db::Db) -> rocket::Rocket<rocket::Build> {
                 routes::list_comments,
                 routes::acquire_lock,
                 routes::release_lock,
+                routes::search_documents,
+                routes::restore_version,
                 routes::health,
+                routes::openapi_spec,
             ],
         )
         .register(

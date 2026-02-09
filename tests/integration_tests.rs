@@ -395,3 +395,98 @@ fn test_workspace_not_found() {
     let res = client.get("/api/v1/workspaces/nonexistent-id").dispatch();
     assert_eq!(res.status(), Status::NotFound);
 }
+
+#[test]
+fn test_openapi_spec() {
+    let client = test_client();
+    let res = client.get("/api/v1/openapi.json").dispatch();
+    assert_eq!(res.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&res.into_string().unwrap()).unwrap();
+    assert_eq!(body["openapi"], "3.0.3");
+    assert_eq!(body["info"]["title"], "Agent Docs API");
+    assert!(body["paths"].as_object().unwrap().len() > 10);
+}
+
+#[test]
+fn test_search_documents() {
+    let client = test_client();
+    let ws = create_workspace(&client, "Search WS");
+    let ws_id = ws["id"].as_str().unwrap();
+    let key = ws["manage_key"].as_str().unwrap();
+
+    create_doc(&client, ws_id, key, "Rust Guide", "Learn Rust programming language");
+    create_doc(&client, ws_id, key, "Python Guide", "Learn Python programming language");
+
+    // Search for "Rust"
+    let res = client
+        .get(format!("/api/v1/workspaces/{}/search?q=Rust", ws_id))
+        .dispatch();
+    assert_eq!(res.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&res.into_string().unwrap()).unwrap();
+    assert_eq!(body["count"], 1);
+    assert_eq!(body["results"][0]["title"], "Rust Guide");
+
+    // Search for "programming" — matches both
+    let res = client
+        .get(format!(
+            "/api/v1/workspaces/{}/search?q=programming",
+            ws_id
+        ))
+        .dispatch();
+    assert_eq!(res.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&res.into_string().unwrap()).unwrap();
+    assert_eq!(body["count"], 2);
+}
+
+#[test]
+fn test_restore_version() {
+    let client = test_client();
+    let ws = create_workspace(&client, "Restore WS");
+    let ws_id = ws["id"].as_str().unwrap();
+    let key = ws["manage_key"].as_str().unwrap();
+
+    let doc = create_doc(&client, ws_id, key, "Versioned Doc", "Version 1 content");
+    let doc_id = doc["id"].as_str().unwrap();
+
+    // Update to create version 1
+    client
+        .patch(format!("/api/v1/workspaces/{}/docs/{}", ws_id, doc_id))
+        .header(ContentType::JSON)
+        .header(rocket::http::Header::new(
+            "Authorization",
+            format!("Bearer {}", key),
+        ))
+        .body(r#"{"content": "Version 2 content"}"#)
+        .dispatch();
+
+    // Verify current content is v2
+    let slug = doc["slug"].as_str().unwrap();
+    let res = client
+        .get(format!("/api/v1/workspaces/{}/docs/{}", ws_id, slug))
+        .dispatch();
+    let body: Value = serde_json::from_str(&res.into_string().unwrap()).unwrap();
+    assert!(body["content"].as_str().unwrap().contains("Version 2"));
+
+    // Restore to version 1
+    let res = client
+        .post(format!(
+            "/api/v1/workspaces/{}/docs/{}/versions/1/restore",
+            ws_id, doc_id
+        ))
+        .header(rocket::http::Header::new(
+            "Authorization",
+            format!("Bearer {}", key),
+        ))
+        .dispatch();
+    assert_eq!(res.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&res.into_string().unwrap()).unwrap();
+    assert_eq!(body["status"], "restored");
+    assert_eq!(body["from_version"], 1);
+
+    // Verify content is restored
+    let res = client
+        .get(format!("/api/v1/workspaces/{}/docs/{}", ws_id, slug))
+        .dispatch();
+    let body: Value = serde_json::from_str(&res.into_string().unwrap()).unwrap();
+    assert!(body["content"].as_str().unwrap().contains("Version 1"));
+}

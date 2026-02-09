@@ -1,0 +1,18 @@
+version: "3.8"
+
+services:
+  agent-docs:
+    image: ghcr.io/humans-not-required/agent-docs:dev
+    container_name: agent-docs
+    restart: unless-stopped
+    ports:
+      - "3005:3005"
+    volumes:
+      - agent-docs-data:/app/data
+    environment:
+      - ROCKET_PORT=3005
+      - ROCKET_ADDRESS=0.0.0.0
+      - DATABASE_PATH=/app/data/agent_docs.db
+
+volumes:
+  agent-docs-data:

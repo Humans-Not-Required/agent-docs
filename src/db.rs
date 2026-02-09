@@ -1,4 +1,5 @@
 use rusqlite::{params, Connection};
+use serde_json::Value;
 use std::sync::Mutex;
 
 pub struct Db {
@@ -604,3 +605,50 @@ pub fn release_lock(db: &Db, doc_id: &str) -> Result<bool, String> {
 
 // Need this import for .optional()
 use rusqlite::OptionalExtension;
+
+pub fn search_documents(
+    db: &Db,
+    workspace_id: &str,
+    query: &str,
+    limit: i32,
+    offset: i32,
+) -> Result<Vec<Value>, String> {
+    let conn = db.conn.lock().unwrap();
+    let pattern = format!("%{}%", query);
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, workspace_id, title, slug, summary, status, author_name, word_count, tags, created_at, updated_at
+             FROM documents
+             WHERE workspace_id = ?1 AND status = 'published'
+               AND (title LIKE ?2 OR content LIKE ?2 OR summary LIKE ?2 OR tags LIKE ?2)
+             ORDER BY updated_at DESC
+             LIMIT ?3 OFFSET ?4",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map(params![workspace_id, pattern, limit, offset], |row| {
+            let tags_str: String = row.get(8)?;
+            let tags: Value = serde_json::from_str(&tags_str).unwrap_or(Value::Array(vec![]));
+            Ok(serde_json::json!({
+                "id": row.get::<_, String>(0)?,
+                "workspace_id": row.get::<_, String>(1)?,
+                "title": row.get::<_, String>(2)?,
+                "slug": row.get::<_, String>(3)?,
+                "summary": row.get::<_, String>(4)?,
+                "status": row.get::<_, String>(5)?,
+                "author_name": row.get::<_, String>(6)?,
+                "word_count": row.get::<_, i32>(7)?,
+                "tags": tags,
+                "created_at": row.get::<_, String>(9)?,
+                "updated_at": row.get::<_, String>(10)?,
+            }))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut results = Vec::new();
+    for row in rows {
+        results.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(results)
+}
