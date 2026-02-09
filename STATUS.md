@@ -57,7 +57,8 @@ Working Rust/Rocket backend with full REST API:
 6. ~~**Redeploy to staging**~~ ✅ Done (2026-02-09 11:20 UTC) — manual pull, frontend serving confirmed
 7. ~~**Lock renew endpoint**~~ ✅ Done (2026-02-09 11:25 UTC) — `POST /lock/renew` with editor + ttl_seconds, conflict if different editor or expired
 8. ~~**Comment moderation**~~ ✅ Done (2026-02-09 11:25 UTC) — `PATCH` (resolve/unresolve + content edit), `DELETE` with manage_key auth, cascading reply deletion, frontend UI with ✓/↩ resolve toggle + ✕ delete button, resolved comments visually dimmed with green checkmark
-9. **Frontend polish** — mobile responsive, Cloudflare tunnel (docs.ckbdev.com)
+9. ~~**Mobile responsive frontend**~~ ✅ Done (2026-02-09 11:40 UTC) — useIsMobile hook, bottom-sheet modals on mobile, single-column edit/tags layout, iOS font-size zoom fix, touch-friendly button min-height, table overflow scroll, adaptive typography/spacing, responsive hero section. Commit: a29905e
+10. **Cloudflare tunnel** — set up docs.ckbdev.com, needs Jordan to add DNS record
 
 ### ⚠️ Gotchas
 
@@ -104,4 +105,8 @@ Working Rust/Rocket backend with full REST API:
 - **OpenAPI updated** — lock/renew + comment PATCH/DELETE in spec
 - **Frontend redeployed** — manual Docker pull, frontend serving on 192.168.0.79:3005
 
-*Last updated: 2026-02-09 11:25 UTC — lock renew + comment moderation. 23 tests passing, zero clippy warnings.*
+### Completed (2026-02-09 Overnight — 11:40 UTC)
+
+- **Mobile responsive frontend** — useIsMobile hook (640px breakpoint), bottom-sheet modals on mobile (slide up from bottom with rounded top corners, 85dvh max), single-column grid for edit form Title/Author and Tags/Status rows, adaptive textarea height (250px mobile vs 400px desktop), full-width comment name input on mobile, responsive hero (smaller logo/text), version history hides word count + wraps change desc on mobile, iOS zoom prevention (16px font-size on inputs), touch-friendly 36px min-height buttons, table horizontal scroll on mobile. Commit: a29905e
+
+*Last updated: 2026-02-09 11:40 UTC — mobile responsive frontend. 23 tests passing, zero clippy warnings.*
