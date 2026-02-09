@@ -870,6 +870,17 @@ pub fn health() -> Json<Value> {
     }))
 }
 
+#[get("/llms.txt")]
+pub fn llms_txt() -> (rocket::http::ContentType, &'static str) {
+    (rocket::http::ContentType::Text, include_str!("../llms.txt"))
+}
+
+/// Root-level /llms.txt for standard discovery (outside /api/v1)
+#[get("/llms.txt", rank = 2)]
+pub fn root_llms_txt() -> (rocket::http::ContentType, &'static str) {
+    (rocket::http::ContentType::Text, include_str!("../llms.txt"))
+}
+
 #[get("/openapi.json")]
 pub fn openapi_spec() -> (Status, (rocket::http::ContentType, String)) {
     let spec = serde_json::json!({

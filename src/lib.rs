@@ -94,6 +94,7 @@ pub fn build_rocket(db: db::Db) -> rocket::Rocket<rocket::Build> {
                 routes::restore_version,
                 routes::health,
                 routes::openapi_spec,
+                routes::llms_txt,
                 routes::event_stream,
             ],
         )
@@ -107,6 +108,9 @@ pub fn build_rocket(db: db::Db) -> rocket::Rocket<rocket::Build> {
                 internal_error,
             ],
         );
+
+    // Root-level /llms.txt (before SPA fallback)
+    rocket = rocket.mount("/", rocket::routes![routes::root_llms_txt]);
 
     if has_frontend {
         eprintln!("📁 Serving frontend from {}", static_dir);
