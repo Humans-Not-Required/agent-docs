@@ -5,7 +5,8 @@ RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/li
 COPY Cargo.toml Cargo.lock* ./
 RUN mkdir src && echo 'fn main() {}' > src/main.rs && echo 'pub fn dummy() {}' > src/lib.rs && cargo build --release 2>/dev/null || true
 COPY src ./src
-RUN cargo build --release
+# Ensure Cargo rebuilds the real sources (COPY can preserve older mtimes from the build context)
+RUN find src -type f -name '*.rs' -exec touch {} + && cargo build --release
 
 # Stage 2: Runtime
 FROM debian:bookworm-slim
