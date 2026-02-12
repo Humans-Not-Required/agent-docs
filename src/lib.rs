@@ -40,12 +40,10 @@ fn internal_error(_req: &Request) -> Json<Value> {
 
 /// SPA catch-all: serves index.html for unmatched GET requests (client-side routing).
 #[rocket::get("/<_path..>", rank = 20)]
-pub fn spa_fallback(_path: std::path::PathBuf) -> Option<rocket::fs::NamedFile> {
+pub async fn spa_fallback(_path: std::path::PathBuf) -> Option<rocket::fs::NamedFile> {
     let static_dir = std::env::var("STATIC_DIR").unwrap_or_else(|_| "../frontend/dist".to_string());
     let index = std::path::Path::new(&static_dir).join("index.html");
-    rocket::tokio::runtime::Handle::current()
-        .block_on(rocket::fs::NamedFile::open(index))
-        .ok()
+    rocket::fs::NamedFile::open(index).await.ok()
 }
 
 pub fn build_rocket(db: db::Db) -> rocket::Rocket<rocket::Build> {
