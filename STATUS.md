@@ -49,7 +49,8 @@ Working Rust/Rocket backend with full REST API:
 
 ### What's Next (Priority Order)
 
-1. ~~**Deploy to staging**~~ ✅ Done (2026-02-09 10:49 UTC) — pulled ghcr.io image, running on 192.168.0.79:3005
+1. ~~**Fix direct workspace URL navigation**~~ ✅ Done (2026-02-12 01:48 UTC) — spa_fallback used `block_on()` inside tokio runtime causing panic. Changed to async handler with `.await`. Commit: e302d0a
+2. ~~**Deploy to staging**~~ ✅ Done (2026-02-09 10:49 UTC) — pulled ghcr.io image, running on 192.168.0.79:3005
 2. ~~**Rate limiting**~~ ✅ Done (2026-02-09 10:55 UTC) — IP-based, 10 workspaces/hr/IP (WORKSPACE_RATE_LIMIT env), ClientIp guard
 3. ~~**SSE event stream**~~ ✅ Done (2026-02-09 10:55 UTC) — per-workspace EventBus, 6 event types (workspace/document/comment/lock), 15s heartbeat
 4. ~~**429 JSON catcher**~~ ✅ Done (2026-02-09 10:55 UTC) — returns JSON with RATE_LIMIT_EXCEEDED code
@@ -117,4 +118,8 @@ Working Rust/Rocket backend with full REST API:
 
 - **Fix Docker build for llms.txt** ✅ — Dockerfile was missing `COPY llms.txt` causing CI Docker builds to fail (include_str! couldn't find the file). Tests pass locally because the file exists at project root. Commit: 2c5d7c4
 
-*Last updated: 2026-02-09 15:37 UTC — Docker build fix for llms.txt. 23 tests passing, zero clippy warnings.*
+### Completed (2026-02-14)
+
+- **Fix duplicate slug error message** ✅ — Frontend was reading `err.message` but backend returns `err.error`. Fixed all 3 error handlers (create workspace, save workspace settings, create/edit document) to read `err.error || err.message || 'fallback'`. Users now see "A document with this slug already exists" instead of generic "Failed to save".
+
+*Last updated: 2026-02-14 02:45 UTC — Fixed duplicate slug error display. 23 tests passing.*

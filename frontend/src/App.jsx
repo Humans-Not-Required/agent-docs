@@ -300,7 +300,7 @@ function CreateWorkspaceModal({ onClose, ctx, onCreated }) {
   async function handleCreate() {
     if (!name.trim()) return;
     const res = await api('/workspaces', { method: 'POST', body: { name: name.trim(), description: desc.trim(), is_public: isPublic } });
-    if (!res.ok) { setError('Failed to create workspace'); return; }
+    if (!res.ok) { const err = await res.json().catch(() => ({})); setError(err.error || err.message || 'Failed to create workspace'); return; }
     const data = await res.json();
     storeKey(data.id, data.manage_key);
     addMyWorkspace({ id: data.id, name: name.trim() });
@@ -503,7 +503,7 @@ function WorkspaceSettingsModal({ ws, wsKey, onClose, onSaved }) {
       method: 'PATCH', body: { name, description: desc, is_public: isPublic },
       headers: authHeaders(wsKey),
     });
-    if (!res.ok) { setError('Failed to save'); return; }
+    if (!res.ok) { const err = await res.json().catch(() => ({})); setError(err.error || err.message || 'Failed to save'); return; }
     onSaved();
   }
 
@@ -800,7 +800,7 @@ function EditPage({ ctx, isNew }) {
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      setError(err.message || 'Failed to save');
+      setError(err.error || err.message || 'Failed to save');
       setSaving(false);
       return;
     }
