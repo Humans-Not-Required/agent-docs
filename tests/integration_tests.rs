@@ -702,3 +702,266 @@ fn test_429_json_catcher() {
 
     std::env::set_var("WORKSPACE_RATE_LIMIT", "10");
 }
+
+// --- Additional Coverage ---
+
+#[test]
+fn test_create_doc_without_auth_fails() {
+    let client = test_client();
+    let ws = create_workspace(&client, "Auth Test WS");
+    let ws_id = ws["id"].as_str().unwrap();
+
+    // Try creating a doc without Authorization header
+    let res = client
+        .post(format!("/api/v1/workspaces/{}/docs", ws_id))
+        .header(ContentType::JSON)
+        .body(r#"{"title": "No Auth", "content": "test", "status": "published", "author_name": "Agent"}"#)
+        .dispatch();
+    assert_eq!(res.status(), Status::Unauthorized);
+}
+
+#[test]
+fn test_create_doc_wrong_key_fails() {
+    let client = test_client();
+    let ws = create_workspace(&client, "Wrong Key WS");
+    let ws_id = ws["id"].as_str().unwrap();
+
+    let res = client
+        .post(format!("/api/v1/workspaces/{}/docs", ws_id))
+        .header(ContentType::JSON)
+        .header(rocket::http::Header::new("Authorization", "Bearer adoc_wrongkey"))
+        .body(r#"{"title": "Wrong Key", "content": "test", "status": "published", "author_name": "Agent"}"#)
+        .dispatch();
+    assert_eq!(res.status(), Status::Forbidden);
+}
+
+#[test]
+fn test_create_doc_in_nonexistent_workspace() {
+    let client = test_client();
+
+    let res = client
+        .post("/api/v1/workspaces/nonexistent-id/docs")
+        .header(ContentType::JSON)
+        .header(rocket::http::Header::new("Authorization", "Bearer adoc_somekey"))
+        .body(r#"{"title": "Orphan", "content": "test", "status": "published", "author_name": "Agent"}"#)
+        .dispatch();
+    // Should be 404 or 403 (workspace not found or key doesn't match)
+    assert!(res.status() == Status::NotFound || res.status() == Status::Forbidden);
+}
+
+#[test]
+fn test_document_html_rendering() {
+    let client = test_client();
+    let ws = create_workspace(&client, "HTML WS");
+    let ws_id = ws["id"].as_str().unwrap();
+    let key = ws["manage_key"].as_str().unwrap();
+
+    // Create doc with simple markdown
+    let res = client
+        .post(format!("/api/v1/workspaces/{}/docs", ws_id))
+        .header(ContentType::JSON)
+        .header(rocket::http::Header::new("Authorization", format!("Bearer {}", key)))
+        .body(r#"{"title": "Markdown Doc", "content": "**Bold** text", "status": "published", "author_name": "TestAgent"}"#)
+        .dispatch();
+    assert_eq!(res.status(), Status::Created);
+    let doc: Value = serde_json::from_str(&res.into_string().unwrap()).unwrap();
+    let slug = doc["slug"].as_str().unwrap();
+
+    // GET by slug
+    let res = client
+        .get(format!("/api/v1/workspaces/{}/docs/{}", ws_id, slug))
+        .dispatch();
+    assert_eq!(res.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&res.into_string().unwrap()).unwrap();
+
+    // Document should have content_html field with rendered markdown
+    let html = body["content_html"].as_str().unwrap_or("");
+    assert!(!html.is_empty(), "content_html should not be empty");
+    assert!(html.contains("<strong>") || html.contains("<b>"),
+        "HTML should contain bold markup, got: {}", html);
+}
+
+#[test]
+fn test_lock_conflict() {
+    let client = test_client();
+    let ws = create_workspace(&client, "Lock Conflict WS");
+    let ws_id = ws["id"].as_str().unwrap();
+    let key = ws["manage_key"].as_str().unwrap();
+
+    let doc = create_doc(&client, ws_id, key, "Locked Doc", "Content");
+    let doc_id = doc["id"].as_str().unwrap();
+
+    // First lock by editor_a
+    let res = client
+        .post(format!("/api/v1/workspaces/{}/docs/{}/lock", ws_id, doc_id))
+        .header(ContentType::JSON)
+        .header(rocket::http::Header::new("Authorization", format!("Bearer {}", key)))
+        .body(r#"{"editor": "editor_a", "ttl_seconds": 300}"#)
+        .dispatch();
+    assert_eq!(res.status(), Status::Ok);
+
+    // Second lock by editor_b should fail (conflict)
+    let res = client
+        .post(format!("/api/v1/workspaces/{}/docs/{}/lock", ws_id, doc_id))
+        .header(ContentType::JSON)
+        .header(rocket::http::Header::new("Authorization", format!("Bearer {}", key)))
+        .body(r#"{"editor": "editor_b", "ttl_seconds": 300}"#)
+        .dispatch();
+    assert_eq!(res.status(), Status::Conflict);
+}
+
+#[test]
+fn test_version_list_ordering() {
+    let client = test_client();
+    let ws = create_workspace(&client, "Version Order WS");
+    let ws_id = ws["id"].as_str().unwrap();
+    let key = ws["manage_key"].as_str().unwrap();
+
+    let doc = create_doc(&client, ws_id, key, "Versioned Doc", "Version 1");
+    let doc_id = doc["id"].as_str().unwrap();
+
+    // Create 3 more versions by updating content
+    for i in 2..=4 {
+        let res = client
+            .patch(format!("/api/v1/workspaces/{}/docs/{}", ws_id, doc_id))
+            .header(ContentType::JSON)
+            .header(rocket::http::Header::new("Authorization", format!("Bearer {}", key)))
+            .body(format!(r#"{{"content": "Version {}", "author_name": "TestAgent"}}"#, i))
+            .dispatch();
+        assert_eq!(res.status(), Status::Ok, "Failed to update doc for version {}", i);
+    }
+
+    // List versions
+    let res = client
+        .get(format!("/api/v1/workspaces/{}/docs/{}/versions", ws_id, doc_id))
+        .dispatch();
+    assert_eq!(res.status(), Status::Ok);
+    let versions: Vec<Value> = serde_json::from_str(&res.into_string().unwrap()).unwrap();
+
+    // Should have at least 4 versions (initial + 3 updates)
+    assert!(versions.len() >= 4, "Expected at least 4 versions, got {}", versions.len());
+
+    // Verify they have version numbers
+    for v in &versions {
+        assert!(v["version_number"].is_number());
+    }
+}
+
+#[test]
+fn test_private_workspace_not_in_public_list() {
+    let client = test_client();
+
+    // Create a private workspace
+    let res = client
+        .post("/api/v1/workspaces")
+        .header(ContentType::JSON)
+        .body(r#"{"name": "Private WS", "is_public": false}"#)
+        .dispatch();
+    assert_eq!(res.status(), Status::Created);
+
+    // Create a public workspace
+    create_workspace(&client, "Public WS");
+
+    // List should only show public
+    let res = client.get("/api/v1/workspaces").dispatch();
+    assert_eq!(res.status(), Status::Ok);
+    let workspaces: Vec<Value> = serde_json::from_str(&res.into_string().unwrap()).unwrap();
+
+    assert_eq!(workspaces.len(), 1, "Only public workspace should be listed");
+    assert_eq!(workspaces[0]["name"], "Public WS");
+}
+
+#[test]
+fn test_search_across_documents() {
+    let client = test_client();
+    let ws = create_workspace(&client, "Multi Search WS");
+    let ws_id = ws["id"].as_str().unwrap();
+    let key = ws["manage_key"].as_str().unwrap();
+
+    create_doc(&client, ws_id, key, "Alpha fox document", "The quick brown animal");
+    create_doc(&client, ws_id, key, "Beta dog document", "Lazy canine sleeping");
+    create_doc(&client, ws_id, key, "Gamma fox report", "Another vulpine article");
+
+    // Search for "fox" in titles should find 2 documents
+    let res = client
+        .get(format!("/api/v1/workspaces/{}/search?q=fox", ws_id))
+        .dispatch();
+    assert_eq!(res.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&res.into_string().unwrap()).unwrap();
+    assert_eq!(body["count"], 2, "Expected 2 results for 'fox', got {}", body["count"]);
+
+    // Search for "dog" should find 1
+    let res = client
+        .get(format!("/api/v1/workspaces/{}/search?q=dog", ws_id))
+        .dispatch();
+    let body: Value = serde_json::from_str(&res.into_string().unwrap()).unwrap();
+    assert_eq!(body["count"], 1);
+
+    // Search for "zzzznonexistent" should find 0
+    let res = client
+        .get(format!("/api/v1/workspaces/{}/search?q=zzzznonexistent", ws_id))
+        .dispatch();
+    let body: Value = serde_json::from_str(&res.into_string().unwrap()).unwrap();
+    assert_eq!(body["count"], 0);
+}
+
+#[test]
+fn test_delete_doc_without_auth_fails() {
+    let client = test_client();
+    let ws = create_workspace(&client, "Delete Auth WS");
+    let ws_id = ws["id"].as_str().unwrap();
+    let key = ws["manage_key"].as_str().unwrap();
+
+    let doc = create_doc(&client, ws_id, key, "Protected Doc", "Content");
+    let doc_id = doc["id"].as_str().unwrap();
+    let slug = doc["slug"].as_str().unwrap();
+
+    // Delete without auth — should not succeed (401 or 404 depending on guard behavior)
+    let res = client
+        .delete(format!("/api/v1/workspaces/{}/docs/{}", ws_id, doc_id))
+        .dispatch();
+    assert!(res.status() != Status::Ok && res.status() != Status::NoContent,
+        "Delete without auth should not succeed, got: {:?}", res.status());
+
+    // Doc should still exist (GET by slug)
+    let res = client
+        .get(format!("/api/v1/workspaces/{}/docs/{}", ws_id, slug))
+        .dispatch();
+    assert_eq!(res.status(), Status::Ok);
+}
+
+#[test]
+fn test_lock_release_then_reacquire() {
+    let client = test_client();
+    let ws = create_workspace(&client, "Lock Release WS");
+    let ws_id = ws["id"].as_str().unwrap();
+    let key = ws["manage_key"].as_str().unwrap();
+
+    let doc = create_doc(&client, ws_id, key, "Lock Release Doc", "Content");
+    let doc_id = doc["id"].as_str().unwrap();
+
+    // Acquire lock
+    let res = client
+        .post(format!("/api/v1/workspaces/{}/docs/{}/lock", ws_id, doc_id))
+        .header(ContentType::JSON)
+        .header(rocket::http::Header::new("Authorization", format!("Bearer {}", key)))
+        .body(r#"{"editor": "editor_a", "ttl_seconds": 300}"#)
+        .dispatch();
+    assert_eq!(res.status(), Status::Ok);
+
+    // Release lock
+    let res = client
+        .delete(format!("/api/v1/workspaces/{}/docs/{}/lock", ws_id, doc_id))
+        .header(rocket::http::Header::new("Authorization", format!("Bearer {}", key)))
+        .dispatch();
+    assert_eq!(res.status(), Status::Ok);
+
+    // Now editor_b should be able to acquire
+    let res = client
+        .post(format!("/api/v1/workspaces/{}/docs/{}/lock", ws_id, doc_id))
+        .header(ContentType::JSON)
+        .header(rocket::http::Header::new("Authorization", format!("Bearer {}", key)))
+        .body(r#"{"editor": "editor_b", "ttl_seconds": 300}"#)
+        .dispatch();
+    assert_eq!(res.status(), Status::Ok);
+}
